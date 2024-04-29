@@ -1,0 +1,5 @@
+utilspy @ git+https://github.com/Many98/utilspy
+requests
+aiohttp
+ratelimiter
+fastapi
