@@ -3,3 +3,5 @@
 *.csv
 *.xlsx
 *.pdf
+.metals/
+.vscode/
