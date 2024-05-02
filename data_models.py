@@ -4,11 +4,12 @@ from typing import List, Optional
 class RuianCodeItem(BaseModel):
     kod: Optional[int]
     nazev: Optional[str]
+    
 
 class RuianCodeApiResponse(BaseModel):
     polozky: List[RuianCodeItem | None]
     existujiDalsiPolozky: bool
-    error_msg: Optional[str] = None
+    #error_msg: Optional[str] = None
 
 class SpatialReference(BaseModel):
     wkid: int
@@ -37,4 +38,9 @@ class Candidate(BaseModel):
 class CoordinatesAPIResponse(BaseModel):
     spatialReference: SpatialReference
     candidates: List[Candidate | None]
-    error_msg: Optional[str]
+    #error_msg: Optional[str] = None
+
+
+class ApiResponse(BaseModel):
+    response: CoordinatesAPIResponse | RuianCodeApiResponse | None
+    error_msg: Optional[str] = None
