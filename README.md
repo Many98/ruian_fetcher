@@ -17,7 +17,7 @@ Services we use:
 
 ### Installation
 
-1. Project requires Python 3.12
+1. Project was written in Python 3.12 therefore try to ensure you use it
 2. Clone project: ```git clone https://github.com/Many98/ruian_fetcher.git && cd ruian_fetcher```
 3. Create environment: `python -m venv myenv`
 4. Only on Windows machine temporarily  change execution policy for session by command `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`
