@@ -5,13 +5,15 @@ import requests
 import re
 import asyncio
 import aiohttp
+import json
 
 import pandas as pd
 
-from typing import Any, List, Tuple, Callable
+from typing import Any, List, Tuple, Callable, Optional
 
-from data_models import RuianCodeApiResponse, CoordinatesAPIResponse
+from data_models import RuianCodeApiResponse, CoordinatesAPIResponse, ApiResponse
 from address_formatter import AddressFormatter, RemoveElementsFromLeftStrategy, RemoveElementsFromRightStrategy
+from utils import ensure_length_limit, ensure_clean_address, retry_api_call, retry_adjust_api_call, aensure_length_limit, aensure_clean_address, aretry_adjust_api_call
 
 
 
@@ -21,14 +23,60 @@ class RuianFetcher(Connector):
     """
 
     def __init__(self) -> None:
-        self.__data = None
 
         self.address_formatter = AddressFormatter(RemoveElementsFromLeftStrategy())
 
+    def adjust_address(self, address: str, **kwargs) -> Tuple:
+        """Adjust the address using the formatter
+
+        Args:
+            address (str): address string
+
+        Returns:
+            Tuple: Containing the new arguments list and 
+            kwargs dictionary
+        """
+        
+        new_address = self.address_formatter.format_address(address)
+        
+        return ([new_address], kwargs)
+    
+    def __load_check_data(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined') -> pd.DataFrame:
+        """helper method to load data and do basic checks
+
+        Args:
+            addresses (Optional[Tuple[str]], optional): Tuple of address strings to be processed. Defaults to None.
+            in_file (str, optional): Path to input file. Defaults to ''.
+            server (str, optional): Name of server in local network. Defaults to ''.
+            db (str, optional): Name of MS SQL database. Defaults to ''.
+            in_table (str, optional): Name of input table. Defaults to ''.
+            
+        Raises:
+            Exception: If `column_name` not present in input dataframe 
+            Exception: No data provided
+
+        Returns:
+            pd.DataFrame: dataframe containing input data with addresses
+        """
+        if addresses is not None:
+            column_name = 'address'
+            data = pd.DataFrame({column_name: addresses})
+        else:
+            data = self.load('auto', in_file, server, db, in_table)
+        
+        if data.empty:
+            raise Exception("No data provided")
+
+        if column_name not in data:
+            raise Exception(f'Column {column_name} is not present in DataFrame')
+
+        return data
 
     @staticmethod
     def code_api_details(address: str) -> Tuple:
         """Provide api details for ruian code API
+        Args:
+            address (str): address string
 
         Returns:
             Tuple: (url: str, params: dict, headers: dict)
@@ -57,6 +105,8 @@ class RuianFetcher(Connector):
     def coor_api_details(address: str) -> Tuple:
         """Provide api details for coordinates API
 
+        Args:
+            address (str): address string
         Returns:
             Tuple: (url: str, params: dict, headers: dict)
         """
@@ -68,29 +118,33 @@ class RuianFetcher(Connector):
             'f': 'pjson'
         }, \
 
-                {
-                    
-                }
+                {}
         )
+    
+    def api_call(address: str):
+        
+        pass
 
-    def ensure_length_limit(self, address: str) -> str:
-        """
-        Makes sure address is shorther than 40 chars (required by code API)
-        """
-        if len(address) > 40:
-            address = self.address_formatter.cleanse(address)
-        while len(address) > 40:
-            address = self.address_formatter.format_address(address)
-        return address
+    @ensure_clean_address()
+    @ensure_length_limit(limit=40)
+    @retry_adjust_api_call(
+        retry_count=3, 
+        retry_condition=lambda x: x.response is None,
+        param_adjuster=adjust_address
+    )
+    def fetch_ruian_code(self, address: str) -> ApiResponse:
+        """Fetch RUIAN code data from RUIAN API for given address
 
-    def fetch_ruian_code(self, address: str) -> RuianCodeApiResponse:
-        """
-        Fetch RUIAN code data from RUIAN API for given address
+        Args:
+            address (str): address string
+
+        Returns:
+            ApiResponse: Response of API
         """
 
-        # TODO prepare for 3 situations, error, success and success without found match
+        # TODO use Session pooling object
 
-        address = self.ensure_length_limit(address)  # TODO not sure if here is good place for applying this method
+        # TODO make moregeneric api call method to not repeat yourself
 
         url, params, headers = self.code_api_details(address)
 
@@ -100,17 +154,28 @@ class RuianFetcher(Connector):
             if response.status_code == 200:
                 api_response = RuianCodeApiResponse(**response.json())
                 if not api_response.polozky:
-                    api_response.polozky = [None]
-                return api_response
+                    return ApiResponse()
+                return ApiResponse(response=api_response)
             else:
-                return RuianCodeApiResponse(**{"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"HTTP Error {response.status_code}"})
+                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
             
         except Exception as e:
-            return RuianCodeApiResponse({"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"{str(e)}"})
-            
-    def fetch_coordinates(self, address: str) -> CoordinatesAPIResponse:
-        """
-        Fetch data about coordinates from RUIAN API for given address
+            return ApiResponse(response=None, error_msg=f"{str(e)}")
+    
+    @ensure_clean_address()
+    @retry_adjust_api_call(
+        retry_count=3, 
+        retry_condition=lambda x: x.response is None,
+        param_adjuster=adjust_address
+    )
+    def fetch_coordinates(self, address: str) -> ApiResponse:
+        """Fetch data about coordinates from RUIAN API for given address
+
+        Args:
+            address (str): address string
+
+        Returns:
+            ApiResponse: Response of API
         """
 
         url, params, _ = self.coor_api_details(address)
@@ -118,29 +183,42 @@ class RuianFetcher(Connector):
         response = requests.get(url, params=params)
 
         try:
-            api_response = CoordinatesAPIResponse(**response.json())
-            if not api_response.candidates:
-                api_response.candidates = [None]
-            return api_response
-            
+            if response.status_code == 200:
+                api_response = CoordinatesAPIResponse(**response.json())
+                if not api_response.candidates:
+                    return ApiResponse()
+                return ApiResponse(response=api_response)
+            else:
+                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
         except Exception as e:
-            return CoordinatesAPIResponse(**{"spatialReference": {"wkid": 102067, "latestWkid": 5514},
-                                           "candidates": [None],
-                                           "error_msg": f"{str(e)}"
-                                           })
+            return ApiResponse(response=None, error_msg=f"{str(e)}")
         
-    def bulk_fetch_ruian_codes(self, column_name: str = 'undefined', file_path: str = '', server: str = '', db: str = '', in_table: str = '') -> List[RuianCodeApiResponse]:
+    def bulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
+                               out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
+        """Batch process multiple addresses (Request RUIAN code). 
+           Either from Tuple of address strings, from excel/csv by providing paths and column name or from db
+           Processed data can be exported back to 
+
+        Args:
+            addresses (Optional[Tuple[str]], optional): Tuple of address strings to be processed. Defaults to None.
+            in_file (str, optional): Path to input file. Defaults to ''.
+            server (str, optional): Name of server in local network. Defaults to ''.
+            db (str, optional): Name of MS SQL database. Defaults to ''.
+            in_table (str, optional): Name of input table. Defaults to ''.
+            column_name (str, optional): Name of column where are addresses. Defaults to 'undefined'.
+            out_file (str, optional): Path to output excel/csv file. Defaults to ''.
+            out_table (str, optional): Name of output table. Defaults to ''.
+            export (bool, optional): Whether export data into db/excel/csv. Type of export is derived from file extension. Defaults to False.
+
+        Raises:
+            Exception: If `column_name` not present in input dataframe or No data provided
+
+        Returns:
+            List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        Batch process multiple addresses
-        """
 
-        # TODo add export option as well
+        data = self.__load_check_data(addresses, in_file, server, db, in_table)
 
-        data = self.load('auto', file_path, server, db, in_table)
-
-        if column_name not in data:
-            raise Exception(f'Column {column_name} is not present in DataFrame')
-        
         data['ruian_code'] = None
         data['code_match_address'] = None
 
@@ -155,6 +233,38 @@ class RuianFetcher(Connector):
 
         data.loc[:, 'ruian_code'] = ruians
         data.loc[:, 'code_match_address'] = matches
+        
+        if export:
+            self.export(data, 'auto', out_file, server, db, out_table)
+
+        return responses
+
+    def bulk_fetch_coordinates(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
+                               out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
+
+        """Batch process multiple addresses (Request coordinates).
+           Either from Tuple of address strings, from excel/csv by providing paths and column name or from db
+           Processed data can be exported back to 
+
+        Args:
+            addresses (Optional[Tuple[str]], optional): Tuple of address strings to be processed. Defaults to None.
+            in_file (str, optional): Path to input file. Defaults to ''.
+            server (str, optional): Name of server in local network. Defaults to ''.
+            db (str, optional): Name of MS SQL database. Defaults to ''.
+            in_table (str, optional): Name of input table. Defaults to ''.
+            column_name (str, optional): Name of column where are addresses. Defaults to 'undefined'.
+            out_file (str, optional): Path to output excel/csv file. Defaults to ''.
+            out_table (str, optional): Name of output table. Defaults to ''.
+            export (bool, optional): Whether export data into db/excel/csv. Type of export is derived from file extension. Defaults to False.
+            
+
+        Returns:
+            List[ApiResponse]: List of `ApiResponse` objects representing responses from API
+        """
+
+        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+
+        responses = []
 
         """
         for i, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching coordinates'):
@@ -165,75 +275,102 @@ class RuianFetcher(Connector):
         matches2 = [res.address for res in responses]
         """
 
-        self.export(data, 'excel', 'ruian_processed')
+        if export:
+            self.export(data, 'auto', out_file, server, db, out_table)
 
-    def bulk_fetch_coordinates(self, column_name: str = 'undefined', file_path: str = '', server: str = '', db: str = '', in_table: str = '') -> List[CoordinatesAPIResponse]:
+        return responses
+    
+    @aensure_clean_address()
+    @aensure_length_limit(limit=40)
+    @aretry_adjust_api_call(
+        retry_count=3, 
+        retry_condition=lambda x: x.response is None,
+        param_adjuster=adjust_address
+    )
+    async def afetch_ruian_code(self, address: str) -> ApiResponse:
+        """Asynchronous implementation of `fetch_ruian_code` method
+
+        Args:
+            address (str): address string
+
+        Returns:
+            ApiResponse: Response of API
         """
-        Batch process multiple addresses
-        """
-
-        # TODo add export option as well
-
-        data = self.load('auto', file_path, server, db, in_table)
-
-        pass
-        
-    async def afetch_ruian_code(self, address: str) -> RuianCodeApiResponse:
-        """
-        Asynchronous implementation of `fetch_ruian_code` method
-        """
-        address = self.ensure_length_limit(address)  # TODO not sure if here is good place for applying this method
-
         url, params, headers = self.code_api_details(address)
 
+        # TODO Semaphore is useless here, should be used in bulk method
         async with asyncio.Semaphore(5):  # max 5 concurrent requests
             async with aiohttp.ClientSession() as session:
                 try:
                     async with session.get(url=url, headers=headers, params=params) as response:
-                        if response.status != 200:
+                        if response.status == 200:
                             json_data = await response.json()
                             
                             api_response = RuianCodeApiResponse(**json_data)
                             if not api_response.polozky:
-                                api_response.polozky = [None]
-                            return api_response
+                                return ApiResponse()
+                            return ApiResponse(response=api_response)
                         else:
-                            return RuianCodeApiResponse(**{"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"HTTP Error {response.status}"})
+                            return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
                 except Exception as e:
-                    return RuianCodeApiResponse({"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"{str(e)}"})
+                    return ApiResponse(response=None, error_msg=f"{str(e)}")
 
-    async def afetch_coordinates(self, address: str) -> CoordinatesAPIResponse:
-        """
-        Asynchronous implementation of `fetch_coordinates` method
-        """
-        url, params, _ = self.coor_api_details(address)
+    @aensure_clean_address()         
+    @aretry_adjust_api_call(
+        retry_count=3, 
+        retry_condition=lambda x: x.response is None,
+        param_adjuster=adjust_address
+    )
+    async def afetch_coordinates(self, address: str) -> ApiResponse:
+        """Asynchronous implementation of `fetch_coordinates` method
 
+        Args:
+            address (str): address string
+
+        Returns:
+            ApiResponse: Response of API
+        """
+        url, params, headers = self.coor_api_details(address)
+
+        # TODO Semaphore is useless here, should be used in bulk method
         async with asyncio.Semaphore(5):  # max 5 concurrent requests
             async with aiohttp.ClientSession() as session:
                 try:
-                    async with session.get(url=url, params=params) as response:
-                        if response.status != 200:
-                            json_data = await response.json()
-                            api_response = RuianCodeApiResponse(**json_data)
+                    async with session.get(url=url, params=params, headers=headers) as response:
+                        if response.status == 200:
+                            data = await response.read()
+                            json_data = json.loads(data)
+                            api_response = CoordinatesAPIResponse(**json_data)
 
-                            if not api_response.polozky:
-                                api_response.polozky = [None]
-                            return api_response
+                            if not api_response.candidates:
+                                return ApiResponse()
+                            return ApiResponse(response=api_response)
                         else:
-                            return RuianCodeApiResponse(**{"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"HTTP Error {response.status}"})
+                            return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
                 except Exception as e:
-                    return RuianCodeApiResponse({"polozky":[None],"existujiDalsiPolozky": False, "error_msg": f"{str(e)}"})
+                    return ApiResponse(response=None, error_msg=f"{str(e)}")
 
-        
 
-    async def abulk_fetch_ruian_codes(self, column_name: str = 'undefined', file_path: str = '', server: str = '', db: str = '', in_table: str = '') -> List[RuianCodeApiResponse]:
+    async def abulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
+                                     out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
+        """Asynchronously batch process multiple addresses
+
+        Args:
+            addresses (Optional[Tuple[str]], optional): Tuple of address strings to be processed. Defaults to None.
+            in_file (str, optional): Path to input file. Defaults to ''.
+            server (str, optional): Name of server in local network. Defaults to ''.
+            db (str, optional): Name of MS SQL database. Defaults to ''.
+            in_table (str, optional): Name of input table. Defaults to ''.
+            column_name (str, optional): Name of column where are addresses. Defaults to 'undefined'.
+            out_file (str, optional): Path to output excel/csv file. Defaults to ''.
+            out_table (str, optional): Name of output table. Defaults to ''.
+            export (bool, optional): Whether export data into db/excel/csv. Type of export is derived from file extension. Defaults to False.
+
+        Returns:
+            List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        Asynchronously batch process multiple addresses
-        """
-        data = self.load('auto', file_path, server, db, in_table)
+        data = self.__load_check_data(addresses, in_file, server, db, in_table)
         
-        if column_name not in data:
-            raise Exception(f'Column {column_name} is not present in DataFrame')
         
         data['ruian_code'] = None
         data['code_match_address'] = None
@@ -260,16 +397,75 @@ class RuianFetcher(Connector):
         ruians = [res.polozky[0].kod if res.polozky[0] is not None else None for res in responses]
         matches = [res.nazev if res is not None else None for res in responses]
 
-    async def abulk_fetch_coordinates(self, column_name: str = 'undefined', file_path: str = '', server: str = '', db: str = '', in_table: str = '') -> List[CoordinatesAPIResponse]:
+        if export:
+            self.export(data, 'auto', out_file, server, db, out_table)
+
+        return responses
+
+    async def abulk_fetch_coordinates(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
+                                     out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
+        """Asynchronously batch process multiple addresses
+
+        Args:
+            addresses (Optional[Tuple[str]], optional): Tuple of address strings to be processed. Defaults to None.
+            in_file (str, optional): Path to input file. Defaults to ''.
+            server (str, optional): Name of server in local network. Defaults to ''.
+            db (str, optional): Name of MS SQL database. Defaults to ''.
+            in_table (str, optional): Name of input table. Defaults to ''.
+            column_name (str, optional): Name of column where are addresses. Defaults to 'undefined'.
+            out_file (str, optional): Path to output excel/csv file. Defaults to ''.
+            out_table (str, optional): Name of output table. Defaults to ''.
+            export (bool, optional): Whether export data into db/excel/csv. Type of export is derived from file extension. Defaults to False.
+
+        Returns:
+            List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        Asynchronously batch process multiple addresses
-        """
-        data = self.load('auto', file_path, server, db, in_table)
+        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+
+        responses = []
+
+        if export:
+            self.export(data, 'auto', out_file, server, db, out_table)
+
+        return responses
 
 
 if __name__ == "__main__":
     
     r = RuianFetcher()
 
-    asyncio.run(r.arun(column_name="address"))
-    r.run(column_name="address")
+    # TODO generate exe 
+    
+    for a in [
+    "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika",
+    "Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika",
+    "Sadová 208, Tábor - Horky, 39001, Česká republika",
+    "Mechovka 1121, Praha - Klánovice, 19014, Česká republika",
+    "169, Horákov, 66404, Česká republika",
+    "Jungmanova 869/4, Rýmařov, 79501, Česká republika",
+    "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika",
+    "Vojkovská 44, Říčany, 25101, Česká republika",
+    "Hradec Králové, 50008, Hradec Králové, Partyzánská, 11, Česká republika",
+    "92, Kobeřice, 79807, Česká republika"
+            ]:
+        o = r.fetch_coordinates(a)
+        r.fetch_coordinates(a)
+        print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
+        print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
+        print(asyncio.run(r.afetch_coordinates("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
+        print(asyncio.run(r.afetch_ruian_code("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
+        print(o)
+
+    asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
+    asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika sdadadas"))
+    asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
+    asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika sdadadas"))
+    asyncio.run(r.afetch_ruian_code("Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika"))
+    asyncio.run(r.afetch_coordinates("SDoktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika"))
+
+    r.fetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika sdadadas")
+    r.fetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")
+    r.fetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")
+    r.fetch_ruian_code("Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika")
+    r.fetch_coordinates("Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika")
+    
