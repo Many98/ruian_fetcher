@@ -62,25 +62,40 @@ def retry_adjust_api_call(retry_count: int = 3,
         return wrapper
     return decorator
 
-def ensure_length_limit(func: Callable) -> Callable:
-    """utility decorator to ensure that lenght of address string is less than 40 chars 
+def ensure_clean_address():
+    """utility decorator to ensure that from address were removed unncessary keywords 
+
+    """
+    def decorator(func: Callable) -> Callable:
+
+        def wrapper(self, address: str, *args, **kwargs):
+            
+            address = self.address_formatter.remove(address)
+            address = self.address_formatter.cleanse(address)
+            
+            return func(self, address, *args, **kwargs)
+        return wrapper
+    return decorator
+
+
+
+def ensure_length_limit(limit : int | None = None):
+    """utility decorator to ensure that lenght of address string is less than `limit` chars 
 
     Args:
-        func (Callable): Method of RuianFetcher which returns ApiResponse 
-
-    Returns:
-        Callable: decorated method
+        limit (int | None, optional): limit lenght of string. Defaults to None.
     """
-    def wrapper(self, address: str, *args, **kwargs):
-        
-        address = self.address_formatter.remove(address)
-        address = self.address_formatter.cleanse(address)
+    def decorator(func: Callable) -> Callable:
 
-        while len(address) > 40:
-            address = self.address_formatter.format_address(address)
-        
-        return func(self, address, *args, **kwargs)
-    return wrapper
+        def wrapper(self, address: str, *args, **kwargs):
+
+            if limit is not None:
+                while len(address) > limit:
+                    address = self.address_formatter.format_address(address)
+            
+            return func(self, address, *args, **kwargs)
+        return wrapper
+    return decorator
 
 
 def aretry_adjust_api_call(retry_count: int = 3,
@@ -120,21 +135,32 @@ def aretry_adjust_api_call(retry_count: int = 3,
         return wrapper
     return decorator
 
-def aensure_length_limit(func: Callable) -> Callable:
-    """Async utility decorator to ensure that lenght of address string is less than 40 chars 
+def aensure_clean_address():
+    """Async utility decorator to ensure that from address were removed unncessary keywords 
+    """
+    def decorator(func: Callable) -> Callable:
+        async def wrapper(self, address: str, *args, **kwargs):
+            
+            address = self.address_formatter.remove(address)
+            address = self.address_formatter.cleanse(address)
+            
+            return await func(self, address, *args, **kwargs)
+        return wrapper
+    return decorator
+
+def aensure_length_limit(limit: int | None = None):
+    """Async utility decorator to ensure that lenght of address string is less than `limit` chars 
 
     Args:
-        func (Callable): Method of RuianFetcher which returns ApiResponse 
-
-    Returns:
-        Callable: decorated method
+        limit (int | None): limit lenght of string
     """
-    async def wrapper(self, address: str, *args, **kwargs):
-        
-        if len(address) > 40:
-            address = self.address_formatter.cleanse(address)
-        while len(address) > 40:
-            address = self.address_formatter.format_address(address)
-        
-        return await func(self, address, *args, **kwargs)
-    return wrapper
+    def decorator(func: Callable) -> Callable:
+        async def wrapper(self, address: str, *args, **kwargs):
+            
+            if limit is not None:
+                while len(address) > limit:
+                    address = self.address_formatter.format_address(address)
+            
+            return await func(self, address, *args, **kwargs)
+        return wrapper
+    return decorator
