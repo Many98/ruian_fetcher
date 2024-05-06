@@ -73,9 +73,9 @@ def ensure_length_limit(func: Callable) -> Callable:
     """
     def wrapper(self, address: str, *args, **kwargs):
         
-       
+        address = self.address_formater.remove(address)
         address = self.address_formatter.cleanse(address)
-        
+
         while len(address) > 40:
             address = self.address_formatter.format_address(address)
         
