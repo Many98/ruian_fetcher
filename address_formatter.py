@@ -61,10 +61,32 @@ class AddressFormatter:
         return self.cleanse(self.fallback_strategy.apply_fallback(address))
     
     @staticmethod
-    def cleanse(address: str) -> str:
+    def remove(address: str) -> str:
+        """Removes patterns from address string
+
+        Args:
+            address (str): address string
+
+        Returns:
+            str: cleansed string
+        """
         pattern_country = r",\s*(Česká republika|Česko|Czechia|Czech Republic)"
+        pattern_remove = r"\b(PSČ|psč|č\.p\.)\s*\d+\b"
+
+        return re.sub(pattern_remove, '', re.sub(pattern_country, '', address))
+    
+    @staticmethod
+    def cleanse(address: str) -> str:
+        """Cleanse address string from commas
+
+        Args:
+            address (str): address string
+
+        Returns:
+            str: cleansed string
+        """
         pattern_trim = r"^\s*,|,\s*$"
 
-        return re.sub(pattern_trim, '', re.sub(pattern_country, '', address))
+        return re.sub(pattern_trim, '', address)
 
 
