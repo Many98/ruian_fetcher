@@ -71,7 +71,7 @@ class AddressFormatter:
             str: cleansed string
         """
         pattern_country = r",\s*(Česká republika|Česko|Czechia|Czech Republic)"
-        pattern_remove = r"\bPSČ\b|\bpsč\b"
+        pattern_remove = r"\s*č\.p\.|\bPSČ\b|\bpsč\b"
 
         return re.sub(pattern_remove, '', re.sub(pattern_country, '', address))
     
