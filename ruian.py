@@ -220,19 +220,25 @@ class RuianFetcher(Connector):
         data = self.__load_check_data(addresses, in_file, server, db, in_table)
 
         data['ruian_code'] = None
-        data['code_match_address'] = None
+        data['code_matched_address'] = None
+        data['error_msg'] = None
 
         responses = []
         
-        for i, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching ruian codes'):
+        for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching ruian codes...'):
             responses.append(self.fetch_ruian_code(row[column_name]))  
 
-        ruians = [res.polozky[0].kod if res.polozky[0] is not None else None for res in responses]
-        matches = [res.nazev if res is not None else None for res in responses]
+        ruians = [[k.kod for k in res.response.polozky] if res.response is not None else None for res in responses]
+        matches = [[n.nazev for n in res.response.polozky] if res.response is not None else None for res in responses]
+
         e = [res.error_msg for res in responses]
 
         data.loc[:, 'ruian_code'] = ruians
-        data.loc[:, 'code_match_address'] = matches
+        data.loc[:, 'code_matched_address'] = matches
+        data.loc[:, 'error_msg'] = e
+
+        data = data.explode("ruian_code").reset_index(drop=True)
+        data = data.explode("code_matched_address").reset_index(drop=True)
         
         if export:
             self.export(data, 'auto', out_file, server, db, out_table)
@@ -435,8 +441,7 @@ if __name__ == "__main__":
     r = RuianFetcher()
 
     # TODO generate exe 
-    
-    for a in [
+    ad = (
     "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika",
     "Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika",
     "Sadová 208, Tábor - Horky, 39001, Česká republika",
@@ -447,7 +452,11 @@ if __name__ == "__main__":
     "Vojkovská 44, Říčany, 25101, Česká republika",
     "Hradec Králové, 50008, Hradec Králové, Partyzánská, 11, Česká republika",
     "92, Kobeřice, 79807, Česká republika"
-            ]:
+            )
+    
+    r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
+
+    for a in ad:
         o = r.fetch_coordinates(a)
         r.fetch_coordinates(a)
         print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
