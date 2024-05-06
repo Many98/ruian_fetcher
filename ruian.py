@@ -56,7 +56,7 @@ class RuianFetcher(Connector):
             Exception: No data provided
 
         Returns:
-            pd.DataFrame: dataframe containing input data with addresses
+            Tuple (pd.DataFrame, str): dataframe containing input data with addresses and column name
         """
         if addresses is not None:
             column_name = 'address'
@@ -70,7 +70,7 @@ class RuianFetcher(Connector):
         if column_name not in data:
             raise Exception(f'Column {column_name} is not present in DataFrame')
 
-        return data
+        return data, column_name
 
     @staticmethod
     def code_api_details(address: str) -> Tuple:
@@ -217,7 +217,7 @@ class RuianFetcher(Connector):
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
 
-        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
 
         data['ruian_code'] = None
         data['code_matched_address'] = None
@@ -233,12 +233,11 @@ class RuianFetcher(Connector):
 
         e = [res.error_msg for res in responses]
 
-        data.loc[:, 'ruian_code'] = ruians
-        data.loc[:, 'code_matched_address'] = matches
-        data.loc[:, 'error_msg'] = e
+        data['ruian_code'] = ruians
+        data['code_matched_address'] = matches
+        data['error_msg'] = e
 
-        data = data.explode("ruian_code").reset_index(drop=True)
-        data = data.explode("code_matched_address").reset_index(drop=True)
+        data = data.explode(["ruian_code", "code_matched_address"]).reset_index(drop=True)
         
         if export:
             self.export(data, 'auto', out_file, server, db, out_table)
@@ -268,18 +267,33 @@ class RuianFetcher(Connector):
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
 
-        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
+
+        data['x'] = None
+        data['y'] = None
+        data['coor_matched_address'] = None
+        data['wkid'] = None
+        data['error_msg'] = None
 
         responses = []
 
-        """
-        for i, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching coordinates'):
+        for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching coordinates...'):
             responses.append(self.fetch_coordinates(row[column_name]))  
 
-        coor_x = [res.location.x for res in responses]
-        coor_y = [res.location.x for res in responses]
-        matches2 = [res.address for res in responses]
-        """
+        coor_x = [[n.location.x for n in res.response.candidates] if res.response is not None else None for res in responses]
+        coor_y = [[n.location.y for n in res.response.candidates] if res.response is not None else None for res in responses]
+        matches = [[n.address for n in res.response.candidates] if res.response is not None else None for res in responses]
+        wkid = [[n.location.spatialReference.latestWkid for n in res.response.candidates] if res.response is not None else None for res in responses]
+
+        e = [res.error_msg for res in responses]
+
+        data['x'] = coor_x
+        data['y'] = coor_y
+        data['coor_matched_address'] = matches
+        data['wkid'] = wkid
+        data['error_msg'] = e
+
+        data = data.explode(["x", "y", "coor_matched_address", "wkid"]).reset_index(drop=True)
 
         if export:
             self.export(data, 'auto', out_file, server, db, out_table)
@@ -375,7 +389,7 @@ class RuianFetcher(Connector):
         Returns:
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
         
         
         data['ruian_code'] = None
@@ -426,7 +440,7 @@ class RuianFetcher(Connector):
         Returns:
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        data = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
 
         responses = []
 
@@ -441,6 +455,7 @@ if __name__ == "__main__":
     r = RuianFetcher()
 
     # TODO generate exe 
+    
     ad = (
     "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika",
     "Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika",
@@ -455,6 +470,7 @@ if __name__ == "__main__":
             )
     
     r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
+    r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
 
     for a in ad:
         o = r.fetch_coordinates(a)
