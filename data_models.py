@@ -7,9 +7,8 @@ class RuianCodeItem(BaseModel):
     
 
 class RuianCodeApiResponse(BaseModel):
-    polozky: List[RuianCodeItem | None]
+    polozky: List[RuianCodeItem]
     existujiDalsiPolozky: bool
-    #error_msg: Optional[str] = None
 
 class SpatialReference(BaseModel):
     wkid: int
@@ -37,9 +36,7 @@ class Candidate(BaseModel):
 
 class CoordinatesAPIResponse(BaseModel):
     spatialReference: SpatialReference
-    candidates: List[Candidate | None]
-    #error_msg: Optional[str] = None
-
+    candidates: List[Candidate]
 
 class ApiResponse(BaseModel):
     response: CoordinatesAPIResponse | RuianCodeApiResponse | None = None
