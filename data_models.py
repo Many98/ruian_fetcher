@@ -42,5 +42,5 @@ class CoordinatesAPIResponse(BaseModel):
 
 
 class ApiResponse(BaseModel):
-    response: CoordinatesAPIResponse | RuianCodeApiResponse | None
+    response: CoordinatesAPIResponse | RuianCodeApiResponse | None = None
     error_msg: Optional[str] = None
