@@ -1,12 +1,13 @@
 ## Wrapper over RUIAN API
 
-- Codes: https://vdp.cuzk.cz/vdp/ruian
-- Coordinates: https://ags.cuzk.cz/arcgis/rest/services/RUIAN/Vyhledavaci_sluzba_nad_daty_RUIAN/MapServer/exts/GeocodeSOE/findAddressCandidates
+Services we use:
+- [Ruian Codes API](https://vdp.cuzk.cz/vdp/ruian)
+- [Coordinates API](https://ags.cuzk.cz/arcgis/rest/services/RUIAN/Vyhledavaci_sluzba_nad_daty_RUIAN/MapServer/exts/GeocodeSOE/findAddressCandidates)
 
 #### Notes:
-    - Currently is not implemented any limiting strategy so use it with caution to now overload server
-    - We use existing API which implements own search strategy therefore valid response is not guaranteed
-    - In some cases for one address there may be multiple match candidates. All candidates are exported.
+- Currently is not implemented any limiting strategy so use it with caution to now overload server
+- We use existing API which implements own search strategy therefore valid response is not guaranteed
+- In some cases for one address there may be multiple match candidates. All candidates are exported.
 
 ### Capabilities
 
@@ -17,7 +18,7 @@
 ### Installation
 
 1. Project requires Python 3.12
-2. Clone project: `git clone https://github.com/Many98/ruian_fetcher.git && cd ruian_fetcher`  
+2. Clone project: ```git clone https://github.com/Many98/ruian_fetcher.git && cd ruian_fetcher```
 3. Create environment: `python -m venv myenv`
 4. Only on Windows machine temporarily  change execution policy for session by command `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope Process`
 5. Activate environment: `.\myenv\Scripts\Activate.ps1`
@@ -25,9 +26,11 @@
 
 
 ### CLI Usage
-
+```
 -------------------------------RUIAN API Fetcher -------------------------------
+
 ----------------------- Wrapper over RUIAN API services ---------------
+
 Capabilities:
 1) Obtain `kod adresniho mista` given address (which is default)
 2) Obtain coordinates given address
@@ -53,12 +56,12 @@ options:
                         Path to output excel/csv file. Should contain extension as it is used for file type derivation.
   --out_table OUT_TABLE, -ot OUT_TABLE
                         Name of output table.
-
+```
 #### CLI Examples
 
-- To obtain help use: python``python main.py --help``
-- To fetch ruian codes for 2 addresses: python``python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika"``
-- To fetch coordinates for 2 addresses: python``python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika"`` --coordinates
+- To obtain help use: ```python main.py --help```
+- To fetch ruian codes for 2 addresses: ```python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika"```
+- To fetch coordinates for 2 addresses: ```python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika" --coordinates```
 
 ### API Usage
 - #### TODO: Create API using fastAPI
