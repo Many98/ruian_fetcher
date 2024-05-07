@@ -9,7 +9,7 @@ import json
 
 import pandas as pd
 
-from typing import Any, List, Tuple, Callable, Optional
+from typing import Any, List, Tuple, Callable, Optional, Union
 
 from data_models import RuianCodeApiResponse, CoordinatesAPIResponse, ApiResponse
 from address_formatter import AddressFormatter, RemoveElementsFromLeftStrategy, RemoveElementsFromRightStrategy
@@ -121,9 +121,35 @@ class RuianFetcher(Connector):
                 {}
         )
     
-    def api_call(address: str):
+    def __perform_api_call(self, address: str, test_if_empty: Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool],
+                    api_response_object: Union[CoordinatesAPIResponse, RuianCodeApiResponse], api_details: Callable[[str], Tuple]) -> ApiResponse:
+        """generic api call
+
+        Args:
+            address (str): address string
+            test_if_empty (Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool]): function to test if response is empty
+            api_response_object (Union[CoordinatesAPIResponse, RuianCodeApiResponse]): object in which data will be encapsulated
+            api_details (Callable[[str], Tuple]): static method/function to provide api call details like url, params and headers
+
+        Returns:
+            ApiResponse: Response of API
+        """
         
-        pass
+        url, params, headers = api_details(address)
+
+        response = requests.get(url, headers=headers, params=params)
+
+        try:
+            if response.status_code == 200:
+                api_response = api_response_object(**response.json())
+                if test_if_empty(api_response):
+                    return ApiResponse()
+                return ApiResponse(response=api_response)
+            else:
+                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
+            
+        except Exception as e:
+            return ApiResponse(response=None, error_msg=f"{str(e)}")
 
     @ensure_clean_address()
     @ensure_length_limit(limit=40)
@@ -144,23 +170,7 @@ class RuianFetcher(Connector):
 
         # TODO use Session pooling object
 
-        # TODO make moregeneric api call method to not repeat yourself
-
-        url, params, headers = self.code_api_details(address)
-
-        response = requests.get(url, headers=headers, params=params)
-
-        try:
-            if response.status_code == 200:
-                api_response = RuianCodeApiResponse(**response.json())
-                if not api_response.polozky:
-                    return ApiResponse()
-                return ApiResponse(response=api_response)
-            else:
-                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
-            
-        except Exception as e:
-            return ApiResponse(response=None, error_msg=f"{str(e)}")
+        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details)
     
     @ensure_clean_address()
     @retry_adjust_api_call(
@@ -178,20 +188,7 @@ class RuianFetcher(Connector):
             ApiResponse: Response of API
         """
 
-        url, params, _ = self.coor_api_details(address)
-
-        response = requests.get(url, params=params)
-
-        try:
-            if response.status_code == 200:
-                api_response = CoordinatesAPIResponse(**response.json())
-                if not api_response.candidates:
-                    return ApiResponse()
-                return ApiResponse(response=api_response)
-            else:
-                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
-        except Exception as e:
-            return ApiResponse(response=None, error_msg=f"{str(e)}")
+        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details)
         
     def bulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
                                out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
@@ -454,7 +451,9 @@ if __name__ == "__main__":
     
     r = RuianFetcher()
 
-    # TODO generate exe 
+    # TODO remove redundant code
+    # TODO implement async support properly (with Semaphore on right place)
+    # TODO generate exe / dockerize it
     
     ad = (
     "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika",
@@ -469,18 +468,19 @@ if __name__ == "__main__":
     "92, Kobeřice, 79807, Česká republika"
             )
     
-    r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
-    r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
+    #r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
+    #r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
 
     for a in ad:
-        o = r.fetch_coordinates(a)
-        r.fetch_coordinates(a)
+        print(r.fetch_ruian_code(a))
+        print(r.fetch_coordinates(a))
+        """
         print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
         print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
         print(asyncio.run(r.afetch_coordinates("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
         print(asyncio.run(r.afetch_ruian_code("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
         print(o)
-
+        """
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika sdadadas"))
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
