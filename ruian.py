@@ -297,6 +297,46 @@ class RuianFetcher(Connector):
 
         return responses
     
+    
+    async def __aperform_api_call(self, address: str, test_if_empty: Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool],
+                    api_response_object: Union[CoordinatesAPIResponse, RuianCodeApiResponse], api_details: Callable[[str], Tuple]) -> ApiResponse:
+        """Async version of generic api call
+
+        Args:
+            address (str): address string
+            test_if_empty (Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool]): function to test if response is empty
+            api_response_object (Union[CoordinatesAPIResponse, RuianCodeApiResponse]): object in which data will be encapsulated
+            api_details (Callable[[str], Tuple]): static method/function to provide api call details like url, params and headers
+
+        Returns:
+            ApiResponse: Response of API
+        """
+        
+        url, params, headers = api_details(address)
+
+        # TODO Semaphore is useless here, should be used in bulk method
+        async with asyncio.Semaphore(5):  # max 5 concurrent requests
+            async with aiohttp.ClientSession() as session:
+                try:
+                    async with session.get(url=url, headers=headers, params=params) as response:
+                        if response.status == 200:
+                            try:
+                                json_data = await response.json()
+                            except aiohttp.ContentTypeError:
+                                data = await response.read()
+                                json_data = json.loads(data)
+
+                            api_response = api_response_object(**json_data)
+
+                            if test_if_empty(api_response):
+                                return ApiResponse()
+                            return ApiResponse(response=api_response)
+                        else:
+                            return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
+                except Exception as e:
+                    return ApiResponse(response=None, error_msg=f"{str(e)}")
+    
+
     @aensure_clean_address()
     @aensure_length_limit(limit=40)
     @aretry_adjust_api_call(
@@ -313,24 +353,9 @@ class RuianFetcher(Connector):
         Returns:
             ApiResponse: Response of API
         """
-        url, params, headers = self.code_api_details(address)
 
         # TODO Semaphore is useless here, should be used in bulk method
-        async with asyncio.Semaphore(5):  # max 5 concurrent requests
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.get(url=url, headers=headers, params=params) as response:
-                        if response.status == 200:
-                            json_data = await response.json()
-                            
-                            api_response = RuianCodeApiResponse(**json_data)
-                            if not api_response.polozky:
-                                return ApiResponse()
-                            return ApiResponse(response=api_response)
-                        else:
-                            return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
-                except Exception as e:
-                    return ApiResponse(response=None, error_msg=f"{str(e)}")
+        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details)
 
     @aensure_clean_address()         
     @aretry_adjust_api_call(
@@ -347,25 +372,9 @@ class RuianFetcher(Connector):
         Returns:
             ApiResponse: Response of API
         """
-        url, params, headers = self.coor_api_details(address)
 
         # TODO Semaphore is useless here, should be used in bulk method
-        async with asyncio.Semaphore(5):  # max 5 concurrent requests
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.get(url=url, params=params, headers=headers) as response:
-                        if response.status == 200:
-                            data = await response.read()
-                            json_data = json.loads(data)
-                            api_response = CoordinatesAPIResponse(**json_data)
-
-                            if not api_response.candidates:
-                                return ApiResponse()
-                            return ApiResponse(response=api_response)
-                        else:
-                            return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
-                except Exception as e:
-                    return ApiResponse(response=None, error_msg=f"{str(e)}")
+        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details)
 
 
     async def abulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
@@ -470,6 +479,9 @@ if __name__ == "__main__":
     
     #r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
     #r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
+
+    print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
+    print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
 
     for a in ad:
         print(r.fetch_ruian_code(a))
