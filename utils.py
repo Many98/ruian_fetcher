@@ -79,11 +79,11 @@ def ensure_clean_address():
 
 
 
-def ensure_length_limit(limit : int | None = None):
+def ensure_length_limit(limit : Optional[None] = None):
     """utility decorator to ensure that lenght of address string is less than `limit` chars 
 
     Args:
-        limit (int | None, optional): limit lenght of string. Defaults to None.
+        limit (int, optional): limit lenght of string. Defaults to None.
     """
     def decorator(func: Callable) -> Callable:
 
@@ -148,11 +148,11 @@ def aensure_clean_address():
         return wrapper
     return decorator
 
-def aensure_length_limit(limit: int | None = None):
+def aensure_length_limit(limit: Optional[int] = None):
     """Async utility decorator to ensure that lenght of address string is less than `limit` chars 
 
     Args:
-        limit (int | None): limit lenght of string
+        limit (int, optional): limit lenght of string
     """
     def decorator(func: Callable) -> Callable:
         async def wrapper(self, address: str, *args, **kwargs):
