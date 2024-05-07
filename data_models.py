@@ -2,10 +2,9 @@ from pydantic import BaseModel
 from typing import List, Optional
 
 class RuianCodeItem(BaseModel):
-    kod: Optional[int]
-    nazev: Optional[str]
+    kod: int
+    nazev: str
     
-
 class RuianCodeApiResponse(BaseModel):
     polozky: List[RuianCodeItem]
     existujiDalsiPolozky: bool
@@ -15,29 +14,29 @@ class SpatialReference(BaseModel):
     latestWkid: int
 
 class Location(BaseModel):
-    x: Optional[float]
-    y: Optional[float]
-    spatialReference: Optional[SpatialReference]
+    x: float
+    y: float
+    spatialReference: SpatialReference
 
 class Attributes(BaseModel):
-    Addr_type: Optional[str]
-    Loc_name: Optional[str]
-    Type: Optional[str]
-    City: Optional[str]
-    Country: Optional[str]
-    Match_addr: Optional[str]
-    Score: Optional[int]
+    Addr_type: str
+    Loc_name: str
+    Type: str
+    City: str
+    Country: str
+    Match_addr: str
+    Score: int
 
 class Candidate(BaseModel):
-    address: Optional[str]
-    location: Optional[Location]
-    score: Optional[int]
-    attributes: Optional[Attributes]
+    address: str
+    location: Location
+    score: int
+    attributes: Attributes
 
 class CoordinatesAPIResponse(BaseModel):
     spatialReference: SpatialReference
     candidates: List[Candidate]
 
 class ApiResponse(BaseModel):
-    response: CoordinatesAPIResponse | RuianCodeApiResponse | None = None
+    response: Optional[CoordinatesAPIResponse | RuianCodeApiResponse] = None
     error_msg: Optional[str] = None
