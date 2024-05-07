@@ -9,7 +9,7 @@ import json
 
 import pandas as pd
 
-from typing import Any, List, Tuple, Callable, Optional, Union
+from typing import Any, List, Tuple, Callable, Optional, Union, Type
 
 from data_models import RuianCodeApiResponse, CoordinatesAPIResponse, ApiResponse
 from address_formatter import AddressFormatter, RemoveElementsFromLeftStrategy, RemoveElementsFromRightStrategy
@@ -26,7 +26,7 @@ class RuianFetcher(Connector):
 
         self.address_formatter = AddressFormatter(RemoveElementsFromLeftStrategy())
 
-    def adjust_address(self, address: str, **kwargs) -> Tuple:
+    def adjust_address(self, address: str, *args, **kwargs) -> Tuple:
         """Adjust the address using the formatter
 
         Args:
@@ -39,7 +39,7 @@ class RuianFetcher(Connector):
         
         new_address = self.address_formatter.format_address(address)
         
-        return ([new_address], kwargs)
+        return ([new_address] + list(args), kwargs)
     
     def __load_check_data(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined') -> pd.DataFrame:
         """helper method to load data and do basic checks
@@ -122,34 +122,41 @@ class RuianFetcher(Connector):
         )
     
     def __perform_api_call(self, address: str, test_if_empty: Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool],
-                    api_response_object: Union[CoordinatesAPIResponse, RuianCodeApiResponse], api_details: Callable[[str], Tuple]) -> ApiResponse:
+                    api_response_object: Type[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], api_details: Callable[[str], Tuple],
+                    session: Optional[requests.Session] = None) -> ApiResponse:
         """generic api call
 
         Args:
             address (str): address string
             test_if_empty (Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool]): function to test if response is empty
-            api_response_object (Union[CoordinatesAPIResponse, RuianCodeApiResponse]): object in which data will be encapsulated
+            api_response_object (Type[Union[CoordinatesAPIResponse, RuianCodeApiResponse]]): object in which data will be encapsulated
             api_details (Callable[[str], Tuple]): static method/function to provide api call details like url, params and headers
 
         Returns:
             ApiResponse: Response of API
         """
-        
-        url, params, headers = api_details(address)
-
-        response = requests.get(url, headers=headers, params=params)
-
+        requires_local_session = session is None
+        if requires_local_session:
+            session = requests.Session()
         try:
-            if response.status_code == 200:
-                api_response = api_response_object(**response.json())
-                if test_if_empty(api_response):
-                    return ApiResponse()
-                return ApiResponse(response=api_response)
-            else:
-                return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
-            
-        except Exception as e:
-            return ApiResponse(response=None, error_msg=f"{str(e)}")
+            url, params, headers = api_details(address)
+
+            with session.get(url, headers=headers, params=params) as response:
+
+                try:
+                    if response.status_code == 200:
+                        api_response = api_response_object(**response.json())
+                        if test_if_empty(api_response):
+                            return ApiResponse()
+                        return ApiResponse(response=api_response)
+                    else:
+                        return ApiResponse(response=None, error_msg=f"HTTP Error {response.status_code}")
+                    
+                except Exception as e:
+                    return ApiResponse(response=None, error_msg=f"{str(e)}")
+        finally:
+            if requires_local_session:
+                session.close()
 
     @ensure_clean_address()
     @ensure_length_limit(limit=40)
@@ -158,19 +165,18 @@ class RuianFetcher(Connector):
         retry_condition=lambda x: x.response is None,
         param_adjuster=adjust_address
     )
-    def fetch_ruian_code(self, address: str) -> ApiResponse:
+    def fetch_ruian_code(self, address: str, session: Optional[requests.Session] = None) -> ApiResponse:
         """Fetch RUIAN code data from RUIAN API for given address
 
         Args:
             address (str): address string
+            session (requests.Session, optional): Session object for connection pooling. Defaults to None.
 
         Returns:
             ApiResponse: Response of API
         """
 
-        # TODO use Session pooling object
-
-        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details)
+        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details, session=session)
     
     @ensure_clean_address()
     @retry_adjust_api_call(
@@ -178,17 +184,18 @@ class RuianFetcher(Connector):
         retry_condition=lambda x: x.response is None,
         param_adjuster=adjust_address
     )
-    def fetch_coordinates(self, address: str) -> ApiResponse:
+    def fetch_coordinates(self, address: str, session: Optional[requests.Session] = None) -> ApiResponse:
         """Fetch data about coordinates from RUIAN API for given address
 
         Args:
             address (str): address string
+            session (requests.Session, optional): Session object for connection pooling. Defaults to None.
 
         Returns:
             ApiResponse: Response of API
         """
 
-        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details)
+        return self.__perform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details, session=session)
         
     def bulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
                                out_file: str = '', out_table: str = '', export: bool = False) -> List[ApiResponse]:
@@ -221,9 +228,9 @@ class RuianFetcher(Connector):
         data['error_msg'] = None
 
         responses = []
-        
-        for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching ruian codes...'):
-            responses.append(self.fetch_ruian_code(row[column_name]))  
+        with requests.Session() as se:
+            for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching ruian codes...'):
+                responses.append(self.fetch_ruian_code(row[column_name], se))  
 
         ruians = [[k.kod for k in res.response.polozky] if res.response is not None else None for res in responses]
         matches = [[n.nazev for n in res.response.polozky] if res.response is not None else None for res in responses]
@@ -274,8 +281,9 @@ class RuianFetcher(Connector):
 
         responses = []
 
-        for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching coordinates...'):
-            responses.append(self.fetch_coordinates(row[column_name]))  
+        with requests.Session() as se:
+            for _, row in tqdm(data.iterrows(), total=data.shape[0], desc='Fetching coordinates...'):
+                responses.append(self.fetch_coordinates(row[column_name], se))  
 
         coor_x = [[n.location.x for n in res.response.candidates] if res.response is not None else None for res in responses]
         coor_y = [[n.location.y for n in res.response.candidates] if res.response is not None else None for res in responses]
@@ -460,11 +468,11 @@ if __name__ == "__main__":
     
     r = RuianFetcher()
 
-    # TODO remove redundant code
     # TODO implement async support properly (with Semaphore on right place)
     # TODO generate exe / dockerize it
     
     ad = (
+    "Hradec Králové, 50008, Hradec Králové, Partyzánská, 11, Česká republika",
     "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika",
     "Doktora Edvarda Beneše 644/5, Slaný, 27401, Česká republika",
     "Sadová 208, Tábor - Horky, 39001, Česká republika",
@@ -473,26 +481,21 @@ if __name__ == "__main__":
     "Jungmanova 869/4, Rýmařov, 79501, Česká republika",
     "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika",
     "Vojkovská 44, Říčany, 25101, Česká republika",
-    "Hradec Králové, 50008, Hradec Králové, Partyzánská, 11, Česká republika",
     "92, Kobeřice, 79807, Česká republika"
             )
     
-    #r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
-    #r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
-
-    print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
-    print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
-
-    for a in ad:
-        print(r.fetch_ruian_code(a))
-        print(r.fetch_coordinates(a))
-        """
-        print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
-        print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
-        print(asyncio.run(r.afetch_coordinates("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
-        print(asyncio.run(r.afetch_ruian_code("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
-        print(o)
-        """
+    r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
+    r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
+    with requests.Session() as s:
+        for a in ad:
+            print(r.fetch_ruian_code(a, s))
+            print(r.fetch_coordinates(a, s))
+            """
+            print(asyncio.run(r.afetch_coordinates("Sadová 208, Tábor - Horky, 39001, Česká republika")))
+            print(asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika")))
+            print(asyncio.run(r.afetch_coordinates("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
+            print(asyncio.run(r.afetch_ruian_code("Jungmanova 869/4, Rýmařov, 79501, Česká republika")))
+            """
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika sdadadas"))
     asyncio.run(r.afetch_ruian_code("Sadová 208, Tábor - Horky, 39001, Česká republika"))
