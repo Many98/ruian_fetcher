@@ -307,7 +307,8 @@ class RuianFetcher(Connector):
     
     
     async def __aperform_api_call(self, address: str, test_if_empty: Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool],
-                    api_response_object: Union[CoordinatesAPIResponse, RuianCodeApiResponse], api_details: Callable[[str], Tuple]) -> ApiResponse:
+                    api_response_object: Union[CoordinatesAPIResponse, RuianCodeApiResponse], api_details: Callable[[str], Tuple],
+                    session: Optional[aiohttp.ClientSession] = None, semaphore: Optional[asyncio.Semaphore] = None) -> ApiResponse:
         """Async version of generic api call
 
         Args:
@@ -315,16 +316,24 @@ class RuianFetcher(Connector):
             test_if_empty (Callable[[Union[CoordinatesAPIResponse, RuianCodeApiResponse]], bool]): function to test if response is empty
             api_response_object (Union[CoordinatesAPIResponse, RuianCodeApiResponse]): object in which data will be encapsulated
             api_details (Callable[[str], Tuple]): static method/function to provide api call details like url, params and headers
-
+            session (aiohttp.ClientSession, optional): Session object for connection pooling. Defaults to None.
+            semaphore (asyncio.Semaphore, optional): Semaphore object for basic rate limiting. Defaults to None.
         Returns:
             ApiResponse: Response of API
         """
-        
-        url, params, headers = api_details(address)
+        requires_local_session = session is None
+        if requires_local_session:
+            session = aiohttp.ClientSession()
 
-        # TODO Semaphore is useless here, should be used in bulk method
-        async with asyncio.Semaphore(5):  # max 5 concurrent requests
-            async with aiohttp.ClientSession() as session:
+        requires_local_semaphore = semaphore is None
+        if requires_local_semaphore:
+            semaphore = asyncio.Semaphore(5) # max 5 concurrent requests
+
+        try:
+
+            url, params, headers = api_details(address)
+
+            async with semaphore:  
                 try:
                     async with session.get(url=url, headers=headers, params=params) as response:
                         if response.status == 200:
@@ -343,7 +352,11 @@ class RuianFetcher(Connector):
                             return ApiResponse(response=None, error_msg=f"HTTP Error {response.status}")
                 except Exception as e:
                     return ApiResponse(response=None, error_msg=f"{str(e)}")
-    
+        finally:
+            if requires_local_session:
+                session.close()
+            if requires_local_semaphore:
+                semaphore.release()
 
     @aensure_clean_address()
     @aensure_length_limit(limit=40)
@@ -352,18 +365,20 @@ class RuianFetcher(Connector):
         retry_condition=lambda x: x.response is None,
         param_adjuster=adjust_address
     )
-    async def afetch_ruian_code(self, address: str) -> ApiResponse:
+    async def afetch_ruian_code(self, address: str,
+                                session: Optional[aiohttp.ClientSession] = None, semaphore: Optional[asyncio.Semaphore] = None) -> ApiResponse:
         """Asynchronous implementation of `fetch_ruian_code` method
 
         Args:
             address (str): address string
-
+            session (aiohttp.ClientSession, optional): Session object for connection pooling. Defaults to None.
+            semaphore (asyncio.Semaphore, optional): Semaphore object for basic rate limiting. Defaults to None.
         Returns:
             ApiResponse: Response of API
         """
 
-        # TODO Semaphore is useless here, should be used in bulk method
-        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details)
+        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.polozky, api_response_object=RuianCodeApiResponse, api_details=RuianFetcher.code_api_details,
+                                              session=session, semaphore=semaphore)
 
     @aensure_clean_address()         
     @aretry_adjust_api_call(
@@ -371,18 +386,21 @@ class RuianFetcher(Connector):
         retry_condition=lambda x: x.response is None,
         param_adjuster=adjust_address
     )
-    async def afetch_coordinates(self, address: str) -> ApiResponse:
+    async def afetch_coordinates(self, address: str,
+                                 session: Optional[aiohttp.ClientSession] = None, semaphore: Optional[asyncio.Semaphore] = None) -> ApiResponse:
         """Asynchronous implementation of `fetch_coordinates` method
 
         Args:
             address (str): address string
-
+            session (aiohttp.ClientSession, optional): 
+            session (aiohttp.ClientSession, optional): Session object for connection pooling. Defaults to None.
+            semaphore (asyncio.Semaphore, optional): Semaphore object for basic rate limiting. Defaults to None.
         Returns:
             ApiResponse: Response of API
         """
 
-        # TODO Semaphore is useless here, should be used in bulk method
-        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details)
+        return await self.__aperform_api_call(address=address, test_if_empty=lambda x: not x.candidates, api_response_object=CoordinatesAPIResponse, api_details=RuianFetcher.coor_api_details,
+                                              session=session, semaphore=semaphore)
 
 
     async def abulk_fetch_ruian_codes(self, addresses: Optional[Tuple[str]] = None, in_file: str = '', server: str = '', db: str = '', in_table: str = '', column_name: str = 'undefined',
@@ -405,31 +423,42 @@ class RuianFetcher(Connector):
         """
         data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
         
-        
         data['ruian_code'] = None
-        data['code_match_address'] = None
+        data['code_matched_address'] = None
+        data['error_msg'] = None
 
         tasks = []
+        responses = []
 
-        # Prepare tasks for each row in the DataFrame
-        for i, row in data.iterrows():
-            if row['ruian_code'] is None:
+        semaphore = asyncio.Semaphore(5)
+
+        async with aiohttp.ClientSession() as se:
+            # prepare tasks for each row in the DataFrame
+            for _, row in data.iterrows():
                 address = row[column_name]
-                coro = self.afetch_ruian_code(address)
+                coro = self.afetch_ruian_code(address, se, semaphore)  # note that async func returns awaitable object particularly coroutine
                 tasks.append(coro)
 
-        # Using tqdm for async progress tracking  ... not in order
-        #responses = []
-        #async for result in async_tqdm(asyncio.as_completed(tasks), total=len(tasks), desc='Fetching ruian codes'):
-        #    response = await result
-        #    responses.append(response)
+            # Using tqdm for async progress tracking  ... not in order
+            #responses = []
+            #async for result in async_tqdm(asyncio.as_completed(tasks), total=len(tasks), desc='Fetching ruian codes...'):
+            #    response = await result
+            #    responses.append(response)
 
-        #responses = [await f for f in async_tqdm(asyncio.as_completed(tasks), total=len(tasks), desc='Fetching ruian codes')]
+            #responses = [await f for f in async_tqdm(asyncio.as_completed(tasks), total=len(tasks), desc='Fetching ruian codes..')]
 
-        responses = await async_tqdm.gather(*tasks)  # keeps order of DF
+            responses = await async_tqdm.gather(*tasks, desc="Fetching ruian codes...", total=len(tasks))  # keeps order of DF which is what we want
 
-        ruians = [res.polozky[0].kod if res.polozky[0] is not None else None for res in responses]
-        matches = [res.nazev if res is not None else None for res in responses]
+        ruians = [[k.kod for k in res.response.polozky] if res.response is not None else None for res in responses]
+        matches = [[n.nazev for n in res.response.polozky] if res.response is not None else None for res in responses]
+
+        e = [res.error_msg for res in responses]
+
+        data['ruian_code'] = ruians
+        data['code_matched_address'] = matches
+        data['error_msg'] = e
+
+        data = data.explode(["ruian_code", "code_matched_address"]).reset_index(drop=True)
 
         if export:
             self.export(data, 'auto', out_file, server, db, out_table)
@@ -456,7 +485,41 @@ class RuianFetcher(Connector):
         """
         data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
 
+
+        data['x'] = None
+        data['y'] = None
+        data['coor_matched_address'] = None
+        data['wkid'] = None
+        data['error_msg'] = None
+
         responses = []
+        tasks = []
+
+        semaphore = asyncio.Semaphore(5)
+
+        async with aiohttp.ClientSession() as se:
+            # prepare tasks for each row in the DataFrame
+            for _, row in data.iterrows():
+                address = row[column_name]
+                coro = self.afetch_coordinates(address, se, semaphore)  # note that async func returns awaitable object particularly coroutine
+                tasks.append(coro)
+
+            responses = await async_tqdm.gather(*tasks, desc="Fetching coordinates...", total=len(tasks))  # keeps order of DF
+
+        coor_x = [[n.location.x for n in res.response.candidates] if res.response is not None else None for res in responses]
+        coor_y = [[n.location.y for n in res.response.candidates] if res.response is not None else None for res in responses]
+        matches = [[n.address for n in res.response.candidates] if res.response is not None else None for res in responses]
+        wkid = [[n.location.spatialReference.latestWkid for n in res.response.candidates] if res.response is not None else None for res in responses]
+
+        e = [res.error_msg for res in responses]
+
+        data['x'] = coor_x
+        data['y'] = coor_y
+        data['coor_matched_address'] = matches
+        data['wkid'] = wkid
+        data['error_msg'] = e
+
+        data = data.explode(["x", "y", "coor_matched_address", "wkid"]).reset_index(drop=True)
 
         if export:
             self.export(data, 'auto', out_file, server, db, out_table)
@@ -468,7 +531,6 @@ if __name__ == "__main__":
     
     r = RuianFetcher()
 
-    # TODO implement async support properly (with Semaphore on right place)
     # TODO generate exe / dockerize it
     
     ad = (
@@ -483,7 +545,8 @@ if __name__ == "__main__":
     "Vojkovská 44, Říčany, 25101, Česká republika",
     "92, Kobeřice, 79807, Česká republika"
             )
-    
+    asyncio.run(r.abulk_fetch_ruian_codes(ad))
+    asyncio.run(r.abulk_fetch_coordinates(ad))
     r.bulk_fetch_ruian_codes(ad, out_file="out.csv", export=True)
     r.bulk_fetch_coordinates(ad, out_file="out_cc.csv", export=True)
     with requests.Session() as s:
