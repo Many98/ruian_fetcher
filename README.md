@@ -14,6 +14,7 @@ Services we use:
 - Obtain code given address (so called Kod adresniho mista)
 - Obtain coordinates given address
 - Process multiple addresses (either code or coordinates)
+- Asynchronous execution
 
 ### Installation
 
@@ -25,7 +26,15 @@ Services we use:
 6. Install requirements: `pip install -r requirements.txt`
 
 
-### CLI Usage
+### CLI Usage/ Examples
+
+
+1. #### To obtain help use: 
+```
+python main.py --help
+```
+#### Output will be
+
 ```
 -------------------------------RUIAN API Fetcher -------------------------------
 
@@ -41,6 +50,7 @@ positional arguments:
 
 options:
   -h, --help            show this help message and exit
+  --asynchronous, -a    Whether run job asynchronously to speed up everything. By default code runs synchronously
   --coordinates, -c     Type of task. By default `kod adresniho mista` is fetched. if specified this flag i.e. `--coordinates` or `-c` then coordinates will be fetched instead
   --column_name COLUMN_NAME, -cn COLUMN_NAME
                         Name of column where are stored addresses.
@@ -57,13 +67,37 @@ options:
   --out_table OUT_TABLE, -ot OUT_TABLE
                         Name of output table.
 ```
-#### CLI Examples
 
-- To obtain help use: ```python main.py --help```
-- To fetch ruian codes for 2 addresses: ```python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika"```
-- To fetch coordinates for 2 addresses: ```python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika" --coordinates```
+2. #### To fetch ruian codes for 2 addresses use: 
+```
+python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika"
+```
+
+3. #### To fetch coordinates for 2 addresses use: 
+```
+python main.py "Letovice, Rekreační č.p. 191, PSČ 67961, Česká republika" "Třída Tomáše Bati 941, Otrokovice, 76502, Česká republika" --coordinates
+```
+
+4. #### To fetch ruian codes based on data from `in.csv` file (column `"address"`) and export result to `out.csv` file use:
+```
+python main.py -if "in.csv" -cn "address" -of "out.csv"
+```
+
+5. #### To fetch ruian codes based on data from `in.xlsx` file (column `"address"`) and export result to `out.xlsx` file use:
+```
+python main.py -if "in.xlsx" -cn "address" -of "out.xlsx"
+```
+
+6. #### To fetch ruian codes based on data from MS SQL Server database (column `"address"`) and export result to `out.csv` file use:
+```
+python main.py -s "my_server" -db "my_db" -"it" "my_table" -cn "address" -of "out.csv"
+```
+
+7. #### To ASYNCHRONOUSLY fetch ruian codes based on data from `in.csv` file (column `"address"`) and export result to `out.csv` file use:
+```
+python main.py -if "in.csv" -cn "address" -of "out.csv" -a
+```
 
 ### API Usage
 - #### TODO: Create API using fastAPI
-- #### TODO: Async version of methods
 - #### TODO: Implement/Use some limiter
