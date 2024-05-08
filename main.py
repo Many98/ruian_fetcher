@@ -1,6 +1,7 @@
 import argparse
 import os
 import logging
+import asyncio
 from ruian import RuianFetcher
 
 
@@ -24,6 +25,14 @@ if __name__ == "__main__":
         "address",
         metavar='N', type=str, nargs='*',  # argument can take zero or more values
         help="Addresses to be parsed. Can be zero, one or multiple addressses. E.g. `address_A address_B address_C`"
+
+    )
+
+    parser.add_argument(
+        "--asynchronous",
+        "-a",
+        action='store_true',
+        help="Whether run job asynchronously to speed up everything. By default code runs synchronously"
 
     )
 
@@ -101,10 +110,10 @@ if __name__ == "__main__":
 
     r = RuianFetcher()
 
-    addresses_to_be_processed = tuple(args.address)
+    addresses_to_be_processed = tuple(args.address) if args.address else None
     data_status = True
 
-    if not addresses_to_be_processed:
+    if addresses_to_be_processed is not None:
         if args.in_file or (args.server and args.in_table and args.db):
             logging.info("No addresses provided as argument. Proceeding with data loading...")
             if args.column_name == "undefined":
@@ -129,21 +138,29 @@ if __name__ == "__main__":
     if args.coordinates and data_status:
         logging.info("Quering Coordinates API")
         try:
-            r.bulk_fetch_coordinates(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True)
+            if args.asynchronous:
+                asyncio.run(r.abulk_fetch_coordinates(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True))
+            else:
+                r.bulk_fetch_coordinates(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True)
+            logging.info("Data processed and exported successfuly.")
         except Exception as e:
             logging.error(str(e))
             raise
 
-        logging.info("Data processed and exported successfuly.")
+        
     elif data_status:
         logging.info("Quering RUIAN Code API")
 
         try:
-            r.bulk_fetch_ruian_codes(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True)
+            if args.asynchronous:
+                print(args)
+                asyncio.run(r.abulk_fetch_ruian_codes(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True))
+            else:    
+                r.bulk_fetch_ruian_codes(addresses_to_be_processed, args.in_file, args.server, args.database, args.in_table, args.column_name, args.out_file, args.out_table, export=True)
+            logging.info("Data processed and exported successfuly.")
         except Exception as e:
             logging.error(str(e))
             raise
         
-        logging.info("Data processed and exported successfuly.")
     else:
         pass
