@@ -221,7 +221,7 @@ class RuianFetcher(Connector):
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
 
-        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table, column_name)
 
         data['ruian_code'] = None
         data['code_matched_address'] = None
@@ -271,7 +271,7 @@ class RuianFetcher(Connector):
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
 
-        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table, column_name)
 
         data['x'] = None
         data['y'] = None
@@ -421,7 +421,7 @@ class RuianFetcher(Connector):
         Returns:
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table, column_name)
         
         data['ruian_code'] = None
         data['code_matched_address'] = None
@@ -483,7 +483,7 @@ class RuianFetcher(Connector):
         Returns:
             List[ApiResponse]: List of `ApiResponse` objects representing responses from API
         """
-        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table)
+        data, column_name = self.__load_check_data(addresses, in_file, server, db, in_table, column_name)
 
 
         data['x'] = None
